@@ -34,7 +34,7 @@ def max_model(device, version=1):
         w1 = torch.tensor(
             np.array([[-0.5, 1.0, 1.0, 1.0], [0.5, -1.0, 1.0, 1.0]])
         ).float()
-        w2 = torch.tensor(np.array([[1], [0.5], [0.5,], [-0.1]])).float()
+        w2 = torch.tensor(np.array([[1], [0.5], [0.5], [-0.1]])).float()
 
     linear1 = nn.Linear(2, 4, bias=False)
     linear1.weight.data = torch.t(w1).to(device)
@@ -44,6 +44,33 @@ def max_model(device, version=1):
     model = nn.Sequential(linear1, nn.ReLU(), linear2).to(device)
     return x, y, model
 
+def max_abs_model(device, version=1):
+    # Make sure symmetric inputs are provided
+    x = np.array([[0, 1], [1, 0], [1, 2], [2, 1],[1, -1], [-1, 1], [2, -1], [-1, 2], [0.5, -0.5]])
+    y = np.array([[np.max(xi)+np.abs(xi[0] + xi[1])] for xi in x])
+    x = torch.tensor(x).float().to(device)
+    y = torch.tensor(y).float().to(device)
+
+    if version == 1:
+        # Perfect solution
+        w1 = torch.tensor(
+            np.array([[-0.5, 1.0, 1.0, 1.0, -1.0, 1.0], [0.5, -1.0, 1.0,1.0, -1.0, 1.0]])
+        ).float()
+        w2 = torch.tensor(np.array([[1], [0.5], [0.5], [1], [1], [0.0]])).float()
+    elif version == 2:
+        # Perfect solution except unit (F) which has a non-zero outgoing edge
+        w1 = torch.tensor(
+            np.array([[-0.5, 1.0, 1.0, 1.0, -1.0, 1.0], [0.5, -1.0, 1.0,1.0, -1.0, 1.0]])
+        ).float()
+        w2 = torch.tensor(np.array([[1], [0.5], [0.5], [1], [1],[-0.1]])).float()
+
+    linear1 = nn.Linear(2, 6, bias=False)
+    linear1.weight.data = torch.t(w1).to(device)
+    linear2 = nn.Linear(6, 1, bias=False)
+    linear2.weight.data = torch.t(w2).to(device)
+
+    model = nn.Sequential(linear1, nn.ReLU(), linear2).to(device)
+    return x, y, model
 
 
 class TestTorchPruner(TestCase):
