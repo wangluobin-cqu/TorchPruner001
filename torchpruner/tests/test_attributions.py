@@ -54,15 +54,15 @@ def max_abs_model(device, version=1):
     if version == 1:
         # Perfect solution
         w1 = torch.tensor(
-            np.array([[-0.5, 1.0, 1.0, 1.0, -1.0, 1.0], [0.5, -1.0, 1.0,1.0, -1.0, 1.0]])
+            np.array([[-0.5, 1.0, 1.0, -1.0, 1.0, -1.0, 1.0], [0.5, -1.0, 1.0, -1.0,1.0, -1.0, 1.0]])
         ).float()
-        w2 = torch.tensor(np.array([[1], [0.5], [0.5], [1], [1], [0.0]])).float()
+        w2 = torch.tensor(np.array([[1], [0.5], [-0.5],[0.5], [1], [1], [0.0]])).float()
     elif version == 2:
         # Perfect solution except unit (F) which has a non-zero outgoing edge
         w1 = torch.tensor(
-            np.array([[-0.5, 1.0, 1.0, 1.0, -1.0, 1.0], [0.5, -1.0, 1.0,1.0, -1.0, 1.0]])
+            np.array([[-0.5, 1.0, 1.0, -1.0,1.0, -1.0, 1.0], [0.5, -1.0, 1.0,-1.0,1.0, -1.0, 1.0]])
         ).float()
-        w2 = torch.tensor(np.array([[1], [0.5], [0.5], [1], [1],[-0.1]])).float()
+        w2 = torch.tensor(np.array([[1], [0.5], [0.5],[-0.5], [1], [1],[-0.1]])).float()
 
     linear1 = nn.Linear(2, 6, bias=False)
     linear1.weight.data = torch.t(w1).to(device)
