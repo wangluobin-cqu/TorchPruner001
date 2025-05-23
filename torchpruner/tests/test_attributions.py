@@ -46,7 +46,7 @@ def max_model(device, version=1):
 
 def max_abs_model(device, version=1):
     # Make sure symmetric inputs are provided
-    x = np.array([[0, 1], [1, 0], [1, 2], [2, 1],[1, -1], [-1, 1], [2, -1], [-1, 2], [0.5, -0.5]])
+    x = np.array([[0, 1], [1, 0], [1, 2], [-2, -1],[1, -1], [-1, 1], [2, -1], [-1, 2], [0.5, 0.5]])
     y = np.array([[np.max(xi)+np.abs(xi[0] + xi[1])] for xi in x])
     x = torch.tensor(x).float().to(device)
     y = torch.tensor(y).float().to(device)
