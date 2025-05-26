@@ -5,4 +5,5 @@ from .methods.taylor import TaylorAttributionMetric
 from .methods.weight_norm import WeightNormAttributionMetric
 from .methods.shapley_values import ShapleyAttributionMetric
 from .methods.sv_exact import ExactShapleyAttributionMetric
+from .methods.owen_shapley import OwenShapleyAttributionMetric 
 from .attributions import find_best_module_for_attributions
