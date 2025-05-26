@@ -97,7 +97,7 @@ class OwenShapleyAttributionMetric(_AttributionMetric):
                 loss_s_union_j = self._evaluate_coalition(x_single, y_single, module, coalition_s_union_j)  
                   
                 # Compute marginal contribution  
-                marginal_contribution = loss_s_union_j - loss_s  
+                marginal_contribution = loss_s - loss_s_union_j 
                 marginal_contributions.append(marginal_contribution)  
               
             # Average marginal contributions  
