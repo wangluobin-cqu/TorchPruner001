@@ -150,7 +150,7 @@ class ExactShapleyAttributionMetric(_AttributionMetric):
         handle_s_union_j.remove()  
           
         # Return marginal contribution  
-        marginal = (loss_s_union_j - loss_s).item()  
+        marginal = (loss_s - loss_s_union_j).item()  
         return marginal  
   
     def find_evaluation_module(self, module, find_best_evaluation_module=False):  
