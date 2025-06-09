@@ -1,10 +1,7 @@
-
-
-import itertools  
+import torch  
 import numpy as np  
 from math import factorial  
-import torch  
-from itertools import combinations
+from itertools import combinations  
 from ..attributions import _AttributionMetric  
   
 class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):  
@@ -16,48 +13,71 @@ class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):
         super().__init__(*args, **kwargs)  
         self.group_size = group_size  
       
-    def run(self, module, group_size=None, **kwargs):  
+    def run(self, module, **kwargs):  
         module = super().run(module, **kwargs)  
-        group_size = group_size if group_size is not None else self.group_size  
+        return self.run_module_hierarchical_shapley(module)  
+      
+    def run_module_hierarchical_shapley(self, module):  
+        """  
+        Implementation of exact hierarchical Shapley value computation.  
+        """  
+        sv_results = []  
           
         with torch.no_grad():  
+            # Register hook to capture activations  
             activations = []  
-            handle = module.register_forward_hook(self._forward_hook(activations))  
+            def capture_hook(mod, inp, out):  
+                activations.append(out.detach().clone())  
               
-            # Run forward pass to get activations  
-            for idx, (x, y) in enumerate(self.data_gen):  
+            handle = module.register_forward_hook(capture_hook)  
+              
+            for batch_idx, (x, y) in enumerate(self.data_gen):  
                 x, y = x.to(self.device), y.to(self.device)  
+                  
+                # Get original activations to determine feature dimension  
                 _ = self.model(x)  
+                original_activations = activations[-1]  
+                n_features = original_activations.shape[1]  
+                batch_size = original_activations.shape[0]  
+                  
+                # Initialize Shapley values for this batch  
+                batch_sv = np.zeros((batch_size, n_features))  
+                  
+                # Compute hierarchical Shapley values for each sample  
+                for sample_idx in range(batch_size):  
+                    sample_sv = self._compute_hierarchical_shapley_single(  
+                        x[sample_idx:sample_idx+1],  
+                        y[sample_idx:sample_idx+1],  
+                        module, n_features  
+                    )  
+                    batch_sv[sample_idx] = sample_sv  
+                  
+                sv_results.append(batch_sv)  
               
             handle.remove()  
-              
-            # Compute structured Shapley values for each sample  
-            all_shapley = []  
-            for activation in activations:  
-                shapley_vals = self._compute_structured_shapley(  
-                    activation, group_size  
-                )  
-                all_shapley.append(shapley_vals)  
-              
-            return self.aggregate_over_samples(np.array(all_shapley))  
+          
+        # Concatenate all batches  
+        all_sv = np.concatenate(sv_results, axis=0)  
+        return self.aggregate_over_samples(all_sv)  
       
-    def _compute_structured_shapley(self, example, group_size):  
-        d = example.shape[0] if len(example.shape) == 1 else example.shape[1]  
-        num_groups = d // group_size  
-        feature_indices = list(range(d))  
+    def _compute_hierarchical_shapley_single(self, x_single, y_single, module, n_features):  
+        """  
+        Compute hierarchical Shapley values for a single sample using exact computation.  
+        """  
+        phi = np.zeros(n_features)  
           
-        # Group features  
-        groups = [feature_indices[i*group_size:(i+1)*group_size]   
-                 for i in range(num_groups)]  
-        shapley_values = np.zeros(d)  
+        # Create feature groups  
+        groups = []  
+        for i in range(0, n_features, self.group_size):  
+            groups.append(list(range(i, min(i + self.group_size, n_features))))  
           
+        # Compute exact hierarchical Shapley values  
         for group in groups:  
-            other_features = list(set(feature_indices) - set(group))  
+            other_features = list(set(range(n_features)) - set(group))  
               
             for x_j in group:  
                 phi_j = 0.0  
-                local_group = list(group)  
-                local_group.remove(x_j)  
+                local_group = [f for f in group if f != x_j]  
                   
                 # Iterate over all R_j ⊆ other group features  
                 for r_size in range(len(other_features) + 1):  
@@ -65,7 +85,7 @@ class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):
                         R = list(R)  
                         w_r = (factorial(r_size) *   
                               factorial(len(other_features) - r_size) /   
-                              factorial(len(other_features)))  
+                              factorial(len(other_features))) if other_features else 1.0  
                           
                         # Iterate over all S_j ⊆ current group (except x_j)  
                         for s_size in range(len(local_group) + 1):  
@@ -73,40 +93,52 @@ class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):
                                 S = list(S)  
                                 w_s = (factorial(s_size) *   
                                       factorial(len(local_group) - s_size) /   
-                                      factorial(len(group)))  
+                                      factorial(len(group))) if group else 1.0  
                                   
                                 full_set = R + S + [x_j]  
                                 subset = R + S  
                                   
                                 # Compute marginal contribution  
-                                delta = self._evaluate_subset(example, full_set) - \  
-                                       self._evaluate_subset(example, subset)  
+                                loss_full = self._evaluate_coalition(x_single, y_single, module, full_set, n_features)  
+                                loss_subset = self._evaluate_coalition(x_single, y_single, module, subset, n_features)  
+                                delta = loss_subset - loss_full  # Higher loss means lower importance  
                                 phi_j += w_r * w_s * delta  
                   
-                shapley_values[x_j] = phi_j  
+                phi[x_j] = phi_j  
           
-        return shapley_values  
+        return phi  
       
-    def _evaluate_subset(self, example, indices):  
-        """Evaluate model with only specified feature indices active."""  
-        masked_example = np.zeros_like(example)  
-        if len(example.shape) == 1:  
-            masked_example[indices] = example[indices]  
-        else:  
-            masked_example[:, indices] = example[:, indices]  
+    def _evaluate_coalition(self, x_single, y_single, module, indices, n_features):  
+        """  
+        Evaluate the coalition value v(S) by masking features according to indices.  
+        """  
+        # Create coalition mask  
+        coalition_mask = np.zeros(n_features)  
+        coalition_mask[indices] = 1.0  
           
-        # Convert to tensor and evaluate  
-        with torch.no_grad():  
-            x_tensor = torch.tensor(masked_example).float().to(self.device)  
-            if len(x_tensor.shape) == 1:  
-                x_tensor = x_tensor.unsqueeze(0)  
+        def mask_hook(mod, inp, out):  
+            masked_out = out.clone()  
+            # Apply coalition mask  
+            mask_tensor = torch.tensor(coalition_mask, dtype=torch.float32).to(self.device)  
+            # Expand mask to match output dimensions  
+            if len(masked_out.shape) > 2:  
+                # For convolutional layers  
+                mask_tensor = mask_tensor.view(1, -1, 1, 1)  
+            else:  
+                # For linear layers  
+                mask_tensor = mask_tensor.view(1, -1)  
               
-            # Run through model and compute loss  
-            output = self.model(x_tensor)  
-            # Return a simple metric (you may need to adapt this)  
-            return output.sum().item()  
+            return masked_out * mask_tensor  
+          
+        # Register hook and evaluate  
+        handle = module.register_forward_hook(mask_hook)  
+        try:  
+            output = self.model(x_single)  
+            loss = self.criterion(output, y_single, reduction="none")  
+            return loss.item()  
+        finally:  
+            handle.remove()  
       
-    def _forward_hook(self, activations):  
-        def _hook(module, _, output):  
-            activations.append(output.detach().cpu().numpy())  
-        return _hook
+    def find_evaluation_module(self, module, find_best_evaluation_module=False):  
+        # Hierarchical Shapley works directly on the target module  
+        return module
