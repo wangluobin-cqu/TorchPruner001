@@ -6,7 +6,7 @@ from math import factorial
 import torch  
 from ..attributions import _AttributionMetric  
   
-class StructuredShapleyAttributionMetric(_AttributionMetric):  
+class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):  
     """  
     计算结构化Shapley值归因，将特征分组后计算每个特征的贡献  
     """  
