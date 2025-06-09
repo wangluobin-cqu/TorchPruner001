@@ -1,188 +1,138 @@
-import torch  
+
+
+import itertools  
 import numpy as np  
-from itertools import combinations  
+from math import factorial  
+import torch  
 from ..attributions import _AttributionMetric  
   
-  
-class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):  
+class StructuredShapleyAttributionMetric(_AttributionMetric):  
     """  
-    Compute attributions as exact hierarchical Shapley values.  
+    计算结构化Shapley值归因，将特征分组后计算每个特征的贡献  
+    """  
       
-    This method implements the exact computation of the hierarchical Shapley formula:  
-    Sh_j = Σ_{R_j ⊆ B\B_(j)} [|R_j|!(m-|R_j|-1)!/m!] *   
-           Σ_{S_j ⊆ B_(j)\{x_j}} [|S_j|!(|B_(j)|-|S_j|-1)!/|B_(j)|!] *   
-           [v(R_j ∪ S_j ∪ {x_j}) - v(R_j ∪ S_j)]  
-    """  
-  
-    def __init__(self, *args, group_size=4, **kwargs):  
+    def init(self, *args, group_size=2, **kwargs):  
         super().__init__(*args, **kwargs)  
         self.group_size = group_size  
-  
-    def run(self, module, **kwargs):  
+      
+    def run(self, module, group_size=None, **kwargs):  
         module = super().run(module, **kwargs)  
-        return self.run_module_exact_hierarchical(module)  
-  
-    def run_module_exact_hierarchical(self, module):  
-        """  
-        Implementation of exact hierarchical Shapley value computation.  
-        """  
-        sv_results = []  
+        group_size = group_size if group_size is not None else self.group_size  
+          
+        # 收集所有样本的归因值  
+        all_attributions = []  
           
         with torch.no_grad():  
-            # Register hook to capture activations  
-            activations = []  
-            def capture_hook(mod, inp, out):  
-                activations.append(out.detach().clone())  
-              
-            handle = module.register_forward_hook(capture_hook)  
-              
-            for batch_idx, (x, y) in enumerate(self.data_gen):  
+            for idx, (x, y) in enumerate(self.data_gen):  
                 x, y = x.to(self.device), y.to(self.device)  
                   
-                # Get original activations to determine feature dimension  
-                _ = self.model(x)  
-                original_activations = activations[-1]  
-                n_features = original_activations.shape[1]  
-                batch_size = original_activations.shape[0]  
-                  
-                # Initialize Shapley values for this batch  
-                batch_sv = np.zeros((batch_size, n_features))  
-                  
-                # Compute exact hierarchical Shapley values for each sample  
-                for sample_idx in range(batch_size):  
-                    sample_sv = self._compute_exact_hierarchical_shapley_single(  
-                        x[sample_idx:sample_idx+1],  
-                        y[sample_idx:sample_idx+1],  
-                        module, n_features  
+                # 对每个样本计算结构化Shapley值  
+                for sample_idx in range(x.shape[0]):  
+                    sample_x = x[sample_idx:sample_idx+1]  
+                    sample_y = y[sample_idx:sample_idx+1]  
+                      
+                    # 获取模块的激活值维度  
+                    with torch.no_grad():  
+                        temp_output = self._get_module_output(sample_x, module)  
+                        d = temp_output.shape[1]  # 特征维度  
+                      
+                    # 计算结构化Shapley值  
+                    shapley_values = self._compute_structured_shapley(  
+                        sample_x, sample_y, module, d, group_size  
                     )  
-                    batch_sv[sample_idx] = sample_sv  
-                  
-                sv_results.append(batch_sv)  
-              
-            handle.remove()  
+                    all_attributions.append(shapley_values)  
           
-        # Concatenate all batches  
-        all_sv = np.concatenate(sv_results, axis=0)  
-        return self.aggregate_over_samples(all_sv)  
-  
-    def _compute_exact_hierarchical_shapley_single(self, x_single, y_single, module, n_features):  
-        """  
-        Compute exact hierarchical Shapley values for a single sample.  
-        """  
-        phi = np.zeros(n_features)  
+        # 聚合所有样本的归因值  
+        return self.aggregate_over_samples(np.array(all_attributions))  
+      
+    def _get_module_output(self, x, module):  
+        """获取指定模块的输出"""  
+        def hook_fn(module, input, output):  
+            self._temp_output = output  
           
-        # Create feature groups  
-        groups = self._create_groups(n_features)  
-        m = len(groups)  # number of groups  
-          
-        # For each feature j  
-        for j in range(n_features):  
-            # Find which group contains feature j  
-            group_j_idx = self._find_group_index(j, groups)  
-            group_j = groups[group_j_idx]  
-              
-            shapley_value = 0.0  
-              
-            # First sum: over all subsets R_j of groups excluding group containing j  
-            other_groups = [g for i, g in enumerate(groups) if i != group_j_idx]  
-              
-            # Enumerate all possible subsets of other groups  
-            for r_size in range(len(other_groups) + 1):  
-                for r_groups in combinations(other_groups, r_size):  
-                    # Flatten selected groups to get R_j  
-                    r_j = []  
-                    for group in r_groups:  
-                        r_j.extend(group)  
-                      
-                    # Calculate first weight: |R_j|!(m-|R_j|-1)!/m!  
-                    weight_1 = self._calculate_factorial_weight(len(r_groups), m)  
-                      
-                    # Second sum: over all subsets S_j of group_j excluding j  
-                    group_j_without_j = [f for f in group_j if f != j]  
-                    group_j_size = len(group_j)  
-                      
-                    inner_sum = 0.0  
-                    for s_size in range(len(group_j_without_j) + 1):  
-                        for s_j in combinations(group_j_without_j, s_size):  
-                            s_j = list(s_j)  
-                              
-                            # Calculate second weight: |S_j|!(|B_(j)|-|S_j|-1)!/|B_(j)|!  
-                            weight_2 = self._calculate_factorial_weight(len(s_j), group_j_size)  
-                              
-                            # Calculate marginal contribution: v(R_j ∪ S_j ∪ {j}) - v(R_j ∪ S_j)  
-                            coalition_without_j = r_j + s_j  
-                            coalition_with_j = r_j + s_j + [j]  
-                              
-                            v_without_j = self._evaluate_coalition(x_single, y_single, module, coalition_without_j, n_features)  
-                            v_with_j = self._evaluate_coalition(x_single, y_single, module, coalition_with_j, n_features)  
-                              
-                            marginal_contribution = v_with_j - v_without_j  
-                            inner_sum += weight_2 * marginal_contribution  
-                      
-                    shapley_value += weight_1 * inner_sum  
-              
-            phi[j] = shapley_value  
-          
-        return phi  
-  
-    def _create_groups(self, n_features):  
-        """Create feature groups of fixed size."""  
-        groups = []  
-        for i in range(0, n_features, self.group_size):  
-            groups.append(list(range(i, min(i + self.group_size, n_features))))  
-        return groups  
-  
-    def _find_group_index(self, feature_idx, groups):  
-        """Find which group contains the given feature."""  
-        for i, group in enumerate(groups):  
-            if feature_idx in group:  
-                return i  
-        raise ValueError(f"Feature {feature_idx} not found in any group")  
-  
-    def _calculate_factorial_weight(self, subset_size, total_size):  
-        """Calculate the factorial weight: |S|!(n-|S|-1)!/n!"""  
-        if total_size == 0:  
-            return 1.0  
-          
-        # Use log to avoid overflow for large factorials  
-        import math  
-        log_weight = (math.lgamma(subset_size + 1) +   
-                     math.lgamma(total_size - subset_size) -   
-                     math.lgamma(total_size + 1))  
-        return math.exp(log_weight)  
-  
-    def _evaluate_coalition(self, x_single, y_single, module, coalition_features, n_features):  
-        """  
-        Evaluate the coalition value v(S) by masking features according to coalition.  
-        """  
-        # Create mask: 1 for features in coalition, 0 otherwise  
-        coalition_mask = np.zeros(n_features)  
-        for feature_idx in coalition_features:  
-            coalition_mask[feature_idx] = 1  
-          
-        def mask_hook(mod, inp, out):  
-            masked_out = out.clone()  
-            # Apply coalition mask  
-            mask_tensor = torch.tensor(coalition_mask, dtype=torch.float32).to(self.device)  
-            # Expand mask to match output dimensions  
-            if len(masked_out.shape) > 2:  
-                # For convolutional layers  
-                mask_tensor = mask_tensor.view(1, -1, 1, 1)  
-            else:  
-                # For linear layers  
-                mask_tensor = mask_tensor.view(1, -1)  
-              
-            return masked_out * mask_tensor  
-          
-        # Register hook and evaluate  
-        handle = module.register_forward_hook(mask_hook)  
+        handle = module.register_forward_hook(hook_fn)  
         try:  
-            output = self.model(x_single)  
-            loss = self.criterion(output, y_single, reduction="none")  
-            return loss.item()  
+            self.model(x)  
+            return self._temp_output  
         finally:  
             handle.remove()  
-  
-    def find_evaluation_module(self, module, find_best_evaluation_module=False):  
-        # Exact hierarchical Shapley works directly on the target module  
-        return module
+            if hasattr(self, '_temp_output'):  
+                delattr(self, '_temp_output')  
+      
+    def _compute_structured_shapley(self, x, y, module, d, group_size):  
+        """计算结构化Shapley值"""  
+        num_groups = d // group_size  
+        feature_indices = list(range(d))  
+          
+        # 将特征分组  
+        groups = [feature_indices[i*group_size:(i+1)*group_size] for i in range(num_groups)]  
+        shapley_values = np.zeros(d)  
+          
+        for group in groups:  
+            other_features = list(set(feature_indices) - set(group))  
+              
+            for x_j in group:  
+                phi_j = 0.0  
+                local_group = list(group)  
+                local_group.remove(x_j)  
+                  
+                # 遍历所有 R_j ⊆ 其他组特征  
+                for R in self._powerset(other_features):  
+                    r_size = len(R)  
+                    if len(other_features) == 0:  
+                        w_r = 1.0  
+                    else:  
+                        w_r = factorial(r_size) * factorial(len(other_features) - r_size) / factorial(len(other_features))  
+                      
+                    # 遍历所有 S_j ⊆ 当前组（除 x_j）  
+                    for S in self._powerset(local_group):  
+                        s_size = len(S)  
+                        if len(group) <= 1:  
+                            w_s = 1.0  
+                        else:  
+                            w_s = factorial(s_size) * factorial(len(local_group) - s_size) / factorial(len(group) - 1)  
+                          
+                        full_set = list(R) + list(S) + [x_j]  
+                        subset = list(R) + list(S)  
+                          
+                        # 计算损失差异  
+                        delta = self._compute_loss_difference(x, y, module, full_set, subset)  
+                        phi_j += w_r * w_s * delta  
+                  
+                shapley_values[x_j] = phi_j  
+          
+        return shapley_values  
+      
+    def _compute_loss_difference(self, x, y, module, full_set, subset):  
+        """计算掩码后的损失差异"""  
+        # 计算包含完整集合的损失  
+        loss_full = self._compute_masked_loss(x, y, module, full_set)  
+        # 计算包含子集的损失  
+        loss_subset = self._compute_masked_loss(x, y, module, subset)  
+          
+        return loss_full - loss_subset  
+      
+    def _compute_masked_loss(self, x, y, module, active_indices):  
+        """计算掩码激活后的损失"""  
+        def mask_hook(module, input, output):  
+            # 创建掩码，只保留active_indices中的激活  
+            mask = torch.zeros_like(output)  
+            if len(active_indices) > 0:  
+                mask[:, active_indices] = 1.0  
+            return output * mask  
+          
+        handle = module.register_forward_hook(mask_hook)  
+        try:  
+            with torch.no_grad():  
+                pred = self.model(x)  
+                loss = self.criterion(pred, y, reduction='none')  
+                return loss.item()  
+        finally:  
+            handle.remove()  
+      
+    @staticmethod  
+    def _powerset(s):  
+        """返回集合s的所有子集"""  
+        return list(itertools.chain.from_iterable(  
+            itertools.combinations(s, r) for r in range(len(s)+1)  
+        ))
