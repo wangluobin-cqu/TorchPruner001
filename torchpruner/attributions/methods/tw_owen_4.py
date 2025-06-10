@@ -66,63 +66,77 @@ class GroupedOwenShapleyAttributionMetric(_AttributionMetric):
         return self.aggregate_over_samples(all_sv)  
   
     def _compute_grouped_owen_shapley_single(self, x_single, y_single, module, n_features):  
-        """  
-        Compute grouped Owen Shapley values for a single sample using two-layer sampling.  
-        """  
-        phi = np.zeros(n_features)  
-          
-        # Create simple fixed-size groups  
-        groups = []  
-        for i in range(0, n_features, self.group_size):  
-            groups.append(list(range(i, min(i + self.group_size, n_features))))  
-          
-        # Generate two-layer stratified samples  
-        s = []  
-        for _ in range(self.runs):  
-            for q1_num in range(self.q_splits + 1):  
-                q1 = q1_num / self.q_splits  # First layer sampling probability  
-                  
-                for q2_num in range(self.q2_splits + 1):  
-                    q2 = q2_num / self.q2_splits  # Second layer sampling probability  
-                      
-                    feature_mask = np.zeros(n_features)  
-                      
-                    # First layer: sample groups with probability q1  
-                    for group in groups:  
+    """  
+    Compute grouped Owen Shapley values for a single sample using two-layer sampling.  
+    """  
+    phi = np.zeros(n_features)  
+
+    # Create simple fixed-size groups
+    groups = []  
+    for i in range(0, n_features, self.group_size):  
+        groups.append(list(range(i, min(i + self.group_size, n_features))))  
+
+    # Find the group that contains x_j (specific feature to isolate)
+    x_j_group = None
+    for group in groups:
+        if x_single[0, group].argmax() == x_single[0, group].shape[0]:  # This logic will depend on how x_j is defined
+            x_j_group = group
+            break
+
+    # Generate two-layer stratified samples  
+    s = []  
+    for _ in range(self.runs):  
+        for q1_num in range(self.q_splits + 1):  
+            q1 = q1_num / self.q_splits  # First layer sampling probability  
+
+            for q2_num in range(self.q2_splits + 1):  
+                q2 = q2_num / self.q2_splits  # Second layer sampling probability  
+
+                feature_mask = np.zeros(n_features)  
+
+                # First layer: sample groups with probability q1 except for the group containing x_j
+                for group in groups:
+                    if group != x_j_group:  # Skip the group containing x_j here
                         if np.random.binomial(1, q1) == 1:  
                             # Group selected, second layer: sample features within group with probability q2  
                             for feature_idx in group:  
-                                feature_mask[feature_idx] = np.random.binomial(1, q2)  
-                      
-                    s.append(feature_mask)  
-          
-        s = np.array(s)  
-          
-        # Compute Shapley values for each feature  
-        for j in range(n_features):  
-            marginal_contributions = []  
-              
-            for mask in s:  
-                # Create coalition S without feature j  
-                coalition_s = mask.copy()  
-                coalition_s[j] = 0  
-                  
-                # Create coalition S ∪ {j}  
-                coalition_s_union_j = mask.copy()  
-                coalition_s_union_j[j] = 1  
-                  
-                # Evaluate v(S) and v(S ∪ {j})  
-                loss_s = self._evaluate_coalition(x_single, y_single, module, coalition_s)  
-                loss_s_union_j = self._evaluate_coalition(x_single, y_single, module, coalition_s_union_j)  
-                  
-                # Compute marginal contribution  
-                marginal_contribution = loss_s - loss_s_union_j  
-                marginal_contributions.append(marginal_contribution)  
-              
-            # Average marginal contributions  
-            phi[j] = np.mean(marginal_contributions)  
-          
-        return phi  
+                                feature_mask[feature_idx] = np.random.binomial(1, q2)
+
+                # Second layer: sample features within the group containing x_j with probability q2
+                if x_j_group is not None:
+                    for feature_idx in x_j_group:
+                        feature_mask[feature_idx] = np.random.binomial(1, q2)
+
+                s.append(feature_mask)
+
+    s = np.array(s)  
+
+    # Compute Shapley values for each feature  
+    for j in range(n_features):  
+        marginal_contributions = []  
+
+        for mask in s:  
+            # Create coalition S without feature j  
+            coalition_s = mask.copy()  
+            coalition_s[j] = 0  
+
+            # Create coalition S ∪ {j}  
+            coalition_s_union_j = mask.copy()  
+            coalition_s_union_j[j] = 1  
+
+            # Evaluate v(S) and v(S ∪ {j})  
+            loss_s = self._evaluate_coalition(x_single, y_single, module, coalition_s)  
+            loss_s_union_j = self._evaluate_coalition(x_single, y_single, module, coalition_s_union_j)  
+
+            # Compute marginal contribution  
+            marginal_contribution = loss_s - loss_s_union_j  
+            marginal_contributions.append(marginal_contribution)  
+
+        # Average marginal contributions  
+        phi[j] = np.mean(marginal_contributions)  
+
+    return phi
+ 
   
     def _evaluate_coalition(self, x_single, y_single, module, coalition_mask):  
         """  
