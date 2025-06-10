@@ -65,77 +65,57 @@ class GroupedOwenShapleyAttributionMetric(_AttributionMetric):
         all_sv = np.concatenate(sv_results, axis=0)  
         return self.aggregate_over_samples(all_sv)  
   
+    
     def _compute_grouped_owen_shapley_single(self, x_single, y_single, module, n_features):  
-    """  
-    Compute grouped Owen Shapley values for a single sample using two-layer sampling.  
-    """  
-    phi = np.zeros(n_features)  
-
-    # Create simple fixed-size groups
-    groups = []  
-    for i in range(0, n_features, self.group_size):  
-        groups.append(list(range(i, min(i + self.group_size, n_features))))  
-
-    # Find the group that contains x_j (specific feature to isolate)
-    x_j_group = None
-    for group in groups:
-        if x_single[0, group].argmax() == x_single[0, group].shape[0]:  # This logic will depend on how x_j is defined
-            x_j_group = group
-            break
-
-    # Generate two-layer stratified samples  
-    s = []  
-    for _ in range(self.runs):  
-        for q1_num in range(self.q_splits + 1):  
-            q1 = q1_num / self.q_splits  # First layer sampling probability  
-
-            for q2_num in range(self.q2_splits + 1):  
-                q2 = q2_num / self.q2_splits  # Second layer sampling probability  
-
-                feature_mask = np.zeros(n_features)  
-
-                # First layer: sample groups with probability q1 except for the group containing x_j
-                for group in groups:
-                    if group != x_j_group:  # Skip the group containing x_j here
-                        if np.random.binomial(1, q1) == 1:  
-                            # Group selected, second layer: sample features within group with probability q2  
-                            for feature_idx in group:  
-                                feature_mask[feature_idx] = np.random.binomial(1, q2)
-
-                # Second layer: sample features within the group containing x_j with probability q2
-                if x_j_group is not None:
-                    for feature_idx in x_j_group:
-                        feature_mask[feature_idx] = np.random.binomial(1, q2)
-
-                s.append(feature_mask)
-
-    s = np.array(s)  
-
-    # Compute Shapley values for each feature  
-    for j in range(n_features):  
-        marginal_contributions = []  
-
-        for mask in s:  
-            # Create coalition S without feature j  
-            coalition_s = mask.copy()  
-            coalition_s[j] = 0  
-
-            # Create coalition S ∪ {j}  
-            coalition_s_union_j = mask.copy()  
-            coalition_s_union_j[j] = 1  
-
-            # Evaluate v(S) and v(S ∪ {j})  
-            loss_s = self._evaluate_coalition(x_single, y_single, module, coalition_s)  
-            loss_s_union_j = self._evaluate_coalition(x_single, y_single, module, coalition_s_union_j)  
-
-            # Compute marginal contribution  
-            marginal_contribution = loss_s - loss_s_union_j  
-            marginal_contributions.append(marginal_contribution)  
-
-        # Average marginal contributions  
-        phi[j] = np.mean(marginal_contributions)  
-
-    return phi
+      phi = np.zeros(n_features)  
+      groups = []  
+      for i in range(0, n_features, self.group_size):  
+          groups.append(list(range(i, min(i + self.group_size, n_features))))  
+    
+      for group in groups:  
+          other_groups = [g for g in groups if g != group]  
+            
+          for x_j in group:  
+              phi_j = 0.0  
+                
+              for _ in range(self.runs):  
+                  for q1_num in range(self.q_splits):  
+                      q1 = q1_num / self.q_splits  
+                        
+                      for q2_num in range(self.q2_splits):  
+                          q2 = q2_num / self.q2_splits  
+                            
+                          # 分层采样：先采样其他组，再采样当前组内特征  
+                          feature_mask = np.zeros(n_features)  
+                            
+                          # 第一层：采样其他组  
+                          for other_group in other_groups:  
+                              if np.random.binomial(1, q1) == 1:  
+                                  for idx in other_group:  
+                                      feature_mask[idx] = 1  
+                            
+                          # 第二层：采样当前组内其他特征  
+                          current_group_others = [f for f in group if f != x_j]  
+                          for idx in current_group_others:  
+                              if np.random.binomial(1, q2) == 1:  
+                                  feature_mask[idx] = 1  
+                            
+                          # 计算边际贡献  
+                          coalition_s = feature_mask.copy()  
+                          coalition_s[x_j] = 0  
+                            
+                          coalition_s_union_j = feature_mask.copy()  
+                          coalition_s_union_j[x_j] = 1  
+                            
+                          loss_s = self._evaluate_coalition(x_single, y_single, module, coalition_s)  
+                          loss_s_union_j = self._evaluate_coalition(x_single, y_single, module, coalition_s_union_j)  
+                            
+                          marginal_contribution = loss_s - loss_s_union_j  
+                          phi_j += marginal_contribution  
+                
+              phi[x_j] = phi_j / (self.q_splits * self.q2_splits * self.runs)  
+        
+      return phi
  
   
     def _evaluate_coalition(self, x_single, y_single, module, coalition_mask):  
