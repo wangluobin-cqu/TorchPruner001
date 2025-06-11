@@ -66,54 +66,56 @@ class GroupedOwenShapleyAttributionMetric(_AttributionMetric):
         return self.aggregate_over_samples(all_sv)  
   
     
-    def _compute_hierarchical_shapley_single(self, x_single, y_single, module, n_features):  
-        """  
-        Compute hierarchical Shapley values for a single sample using exact computation.  
-        """  
-        phi = np.zeros(n_features)  
-          
-        # Create feature groups  
-        groups = []  
-        for i in range(0, n_features, self.group_size):  
-            groups.append(list(range(i, min(i + self.group_size, n_features))))  
-          
-        # Compute exact hierarchical Shapley values  
-        for group in groups:  
-            other_features = [g for g in groups if g != group]  
-              
-            for x_j in group:  
-                phi_j = 0.0  
-                local_group = [f for f in group if f != x_j]  
-                  
-                # Iterate over all R_j ⊆ other group features  
-                for r_size in range(len(other_features) + 1):  
-                    for R in combinations(other_features, r_size):  
-                        R = list(R)  
-                        expanded_R = [f for subgroup in R for f in subgroup] 
-                        w_r = (factorial(r_size) *   
-                              factorial(len(groups) - r_size-1) /   
-                              factorial(len(groups))) if groups else 1.0  
-                          
-                        # Iterate over all S_j ⊆ current group (except x_j)  
-                        for s_size in range(len(local_group) + 1):  
-                            for S in combinations(local_group, s_size):  
-                                S = list(S)  
-                                w_s = (factorial(s_size) *   
-                                      factorial(len(group) - s_size-1) /   
-                                      factorial(len(group))) if group else 1.0  
-                                  
-                                full_set = expanded_R + S + [x_j]  
-                                subset = expanded_R + S   
-                                  
-                                # Compute marginal contribution  
-                                loss_full = self._evaluate_coalition(x_single, y_single, module, full_set, n_features)  
-                                loss_subset = self._evaluate_coalition(x_single, y_single, module, subset, n_features)  
-                                delta = loss_subset - loss_full  # Higher loss means lower importance  
-                                phi_j += w_r * w_s * delta  
-                  
-                phi[x_j] = phi_j  
-          
-        return phi 
+     def _compute_grouped_owen_shapley_single(self, x_single, y_single, module, n_features):  Add commentMore actions
+      phi = np.zeros(n_features)  
+      groups = []  
+      for i in range(0, n_features, self.group_size):  
+          groups.append(list(range(i, min(i + self.group_size, n_features))))  
+    
+      for group in groups:  
+          other_groups = [g for g in groups if g != group]  
+            
+          for x_j in group:  
+              phi_j = 0.0  
+                
+              for _ in range(self.runs):  
+                  for q1_num in range(self.q_splits):  
+                      q1 = q1_num / self.q_splits  
+                        
+                      for q2_num in range(self.q2_splits):  
+                          q2 = q2_num / self.q2_splits  
+                            
+                          # 分层采样：先采样其他组，再采样当前组内特征  
+                          feature_mask = np.zeros(n_features)  
+                            
+                          # 第一层：采样其他组  
+                          for other_group in other_groups:  
+                              if np.random.binomial(1, q1) == 1:  
+                                  for idx in other_group:  
+                                      feature_mask[idx] = 1  
+                            
+                          # 第二层：采样当前组内其他特征  
+                          current_group_others = [f for f in group if f != x_j]  
+                          for idx in current_group_others:  
+                              if np.random.binomial(1, q2) == 1:  
+                                  feature_mask[idx] = 1  
+                            
+                          # 计算边际贡献  
+                          coalition_s = feature_mask.copy()  
+                          coalition_s[x_j] = 0  
+                            
+                          coalition_s_union_j = feature_mask.copy()  
+                          coalition_s_union_j[x_j] = 1  
+                            
+                          loss_s = self._evaluate_coalition(x_single, y_single, module, coalition_s)  
+                          loss_s_union_j = self._evaluate_coalition(x_single, y_single, module, coalition_s_union_j)  
+                            
+                          marginal_contribution = loss_s - loss_s_union_j  
+                          phi_j += marginal_contribution  
+                
+              phi[x_j] = phi_j / (self.q_splits * self.q2_splits * self.runs)  
+        
+      return phi
  
   
     def _evaluate_coalition(self, x_single, y_single, module, coalition_mask):  
