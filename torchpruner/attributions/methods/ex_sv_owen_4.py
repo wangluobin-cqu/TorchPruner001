@@ -60,7 +60,7 @@ class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):
         all_sv = np.concatenate(sv_results, axis=0)  
         return self.aggregate_over_samples(all_sv)  
       
-"""    def _compute_hierarchical_shapley_single(self, x_single, y_single, module, n_features):  
+  def _compute_hierarchical_shapley_single(self, x_single, y_single, module, n_features):  Add commentMore actions
         """  
         Compute hierarchical Shapley values for a single sample using exact computation.  
         """  
@@ -73,7 +73,7 @@ class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):
           
         # Compute exact hierarchical Shapley values  
         for group in groups:  
-            other_features = list(set(range(n_features)) - set(group))  
+            other_features = [g for g in groups if g != group]  
               
             for x_j in group:  
                 phi_j = 0.0  
@@ -83,54 +83,7 @@ class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):
                 for r_size in range(len(other_features) + 1):  
                     for R in combinations(other_features, r_size):  
                         R = list(R)  
-                        w_r = (factorial(r_size) *   
-                              factorial(len(other_features) - r_size) /   
-                              factorial(len(other_features))) if other_features else 1.0  
-                          
-                        # Iterate over all S_j ⊆ current group (except x_j)  
-                        for s_size in range(len(local_group) + 1):  
-                            for S in combinations(local_group, s_size):  
-                                S = list(S)  
-                                w_s = (factorial(s_size) *   
-                                      factorial(len(local_group) - s_size) /   
-                                      factorial(len(group))) if group else 1.0  
-                                  
-                                full_set = R + S + [x_j]  
-                                subset = R + S  
-                                  
-                                # Compute marginal contribution  
-                                loss_full = self._evaluate_coalition(x_single, y_single, module, full_set, n_features)  
-                                loss_subset = self._evaluate_coalition(x_single, y_single, module, subset, n_features)  
-                                delta = loss_subset - loss_full  # Higher loss means lower importance  
-                                phi_j += w_r * w_s * delta  
-                  
-                phi[x_j] = phi_j  
-          
-        return phi  """
-
-      def _compute_hierarchical_shapley_single(self, x_single, y_single, module, n_features):  
-        """  
-        Compute hierarchical Shapley values for a single sample using exact computation.  
-        """  
-        phi = np.zeros(n_features)  
-          
-        # Create feature groups  
-        groups = []  
-        for i in range(0, n_features, self.group_size):  
-            groups.append(list(range(i, min(i + self.group_size, n_features))))  
-          
-        # Compute exact hierarchical Shapley values  
-        for group in groups:  
-            other_features = list(set(range(n_features)) - set(group))  
-              
-            for x_j in group:  
-                phi_j = 0.0  
-                local_group = [f for f in group if f != x_j]  
-                  
-                # Iterate over all R_j ⊆ other group features  
-                for r_size in range(len(other_features) + 1):  
-                    for R in combinations(other_features, r_size):  
-                        R = list(R)  
+                        expanded_R = [f for subgroup in R for f in subgroup] 
                         w_r = (factorial(r_size) *   
                               factorial(len(groups) - r_size-1) /   
                               factorial(len(groups))) if groups else 1.0  
@@ -143,8 +96,8 @@ class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):
                                       factorial(len(group) - s_size-1) /   
                                       factorial(len(group))) if group else 1.0  
                                   
-                                full_set = R + S + [x_j]  
-                                subset = R + S  
+                                full_set = expanded_R + S + [x_j]  
+                                subset = expanded_R + S   
                                   
                                 # Compute marginal contribution  
                                 loss_full = self._evaluate_coalition(x_single, y_single, module, full_set, n_features)  
