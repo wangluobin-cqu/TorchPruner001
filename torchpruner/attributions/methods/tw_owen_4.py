@@ -11,7 +11,7 @@ class GroupedOwenShapleyAttributionMetric(_AttributionMetric):
     then sampling individual features within selected groups.  
     """  
   
-    def __init__(self, *args, runs=2, q_splits=10, group_size=2, q2_splits=5, **kwargs):  
+    def __init__(self, *args, runs=2, q_splits=10, group_size=4, q2_splits=5, **kwargs):  
         super().__init__(*args, **kwargs)  
         self.runs = runs  
         self.q_splits = q_splits  
