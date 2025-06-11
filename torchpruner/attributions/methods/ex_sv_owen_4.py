@@ -9,7 +9,7 @@ class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):
     Compute structured Shapley value attributions with feature grouping.  
     """  
       
-    def __init__(self, *args, group_size=2, **kwargs):  
+    def __init__(self, *args, group_size=3, **kwargs):  
         super().__init__(*args, **kwargs)  
         self.group_size = group_size  
       
