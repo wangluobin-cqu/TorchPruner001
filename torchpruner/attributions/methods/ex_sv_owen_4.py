@@ -60,7 +60,7 @@ class ExactHierarchicalShapleyAttributionMetric(_AttributionMetric):
         all_sv = np.concatenate(sv_results, axis=0)  
         return self.aggregate_over_samples(all_sv)  
       
-  def _compute_hierarchical_shapley_single(self, x_single, y_single, module, n_features):  
+    def _compute_hierarchical_shapley_single(self, x_single, y_single, module, n_features):
         """  
         Compute hierarchical Shapley values for a single sample using exact computation.  
         """  
