@@ -66,7 +66,7 @@ class GroupedOwenShapleyAttributionMetric(_AttributionMetric):
         return self.aggregate_over_samples(all_sv)  
   
     
-     def _compute_grouped_owen_shapley_single(self, x_single, y_single, module, n_features):  
+    def _compute_grouped_owen_shapley_single(self, x_single, y_single, module, n_features):
       phi = np.zeros(n_features)  
       groups = []  
       for i in range(0, n_features, self.group_size):  
