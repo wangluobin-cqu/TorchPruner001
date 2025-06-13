@@ -92,7 +92,7 @@ METHODS_MAPPING = {
     "APoZ": ("APoZ", COLORS[8]),
     "Weight Norm": ("$||w||_1$", COLORS[6]),
     "Taylor signed": ("Taylor (no abs)", COLORS[3]),
-    "SV": ("SV, $\mu$ aggr.", "black"),
+    "tw_owen_SV": ("tw_owen_SV, $\mu$ aggr.", "black")
 }
 
 
