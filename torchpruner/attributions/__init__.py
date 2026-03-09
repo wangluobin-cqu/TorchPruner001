@@ -9,3 +9,5 @@ from .methods.owen_sv import OwenShapleyAttributionMetric
 from .methods.tw_owen_4 import GroupedOwenShapleyAttributionMetric
 from .methods.ex_sv_owen_4 import ExactHierarchicalShapleyAttributionMetric
 from .attributions import find_best_module_for_attributions
+from .methods.sample_based_shapley import SampleBasedShapleyAttributionMetric  
+from .methods.permutation_shapley import PermutationShapleyAttributionMetric
